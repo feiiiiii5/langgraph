@@ -148,6 +148,36 @@ def test_should_retry_on_invalid_type():
         _should_retry_on(policy, ValueError("test error"))
 
 
+@pytest.mark.parametrize(
+    "retry_on",
+    [
+        "ValueError",
+        ["ValueError"],
+        (ValueError, "TypeError"),
+        ["TypeError", ValueError],
+        b"ValueError",
+    ],
+)
+def test_should_retry_on_sequence_of_non_types(retry_on: object) -> None:
+    """A name, or a list holding one, is not a list of exception classes.
+
+    A str is a Sequence, so these used to reach isinstance() and fail with its
+    own TypeError, which replaced the node's exception and skipped every retry.
+    """
+    policy = RetryPolicy(retry_on=retry_on)  # type: ignore[arg-type]
+
+    with pytest.raises(TypeError, match="retry_on must be an Exception class"):
+        _should_retry_on(policy, ValueError("test error"))
+
+
+def test_should_retry_on_sequence_of_types() -> None:
+    """The supported shape still matches on the exception type."""
+    policy = RetryPolicy(retry_on=[ValueError, TimeoutError])
+
+    assert _should_retry_on(policy, ValueError("test error")) is True
+    assert _should_retry_on(policy, TypeError("test error")) is False
+
+
 def test_should_retry_on_empty_sequence():
     """Test retry with an empty sequence."""
     policy = RetryPolicy(retry_on=())

@@ -838,17 +838,28 @@ async def arun_with_retry(
             config = patch_configurable(config, {CONFIG_KEY_RESUMING: True})
 
 
+_RETRY_ON_TYPE_ERROR = "retry_on must be an Exception class, a list or tuple of Exception classes, or a callable"
+
+
+def _is_exception_type(value: object) -> bool:
+    return isinstance(value, type) and issubclass(value, Exception)
+
+
 def _should_retry_on(retry_policy: RetryPolicy, exc: Exception) -> bool:
     """Check if the given exception should be retried based on the retry policy."""
-    if isinstance(retry_policy.retry_on, Sequence):
-        return isinstance(exc, tuple(retry_policy.retry_on))
-    elif isinstance(retry_policy.retry_on, type) and issubclass(
-        retry_policy.retry_on, Exception
-    ):
-        return isinstance(exc, retry_policy.retry_on)
-    elif callable(retry_policy.retry_on):
-        return retry_policy.retry_on(exc)  # type: ignore[call-arg]
+    retry_on = retry_policy.retry_on
+    # A str is itself a Sequence, so `retry_on="ValueError"` used to be spread
+    # into ('V', 'a', 'l', ...) and isinstance() then raised a TypeError of its
+    # own: the node's own exception was gone from the traceback and no retry ran
+    # at all. Elements are checked for the same reason, since a list mixing a
+    # class with a string silently matched or blew up depending on the order.
+    if isinstance(retry_on, Sequence) and not isinstance(retry_on, (str, bytes)):
+        if not all(_is_exception_type(item) for item in retry_on):
+            raise TypeError(_RETRY_ON_TYPE_ERROR)
+        return isinstance(exc, tuple(retry_on))
+    elif _is_exception_type(retry_on):
+        return isinstance(exc, retry_on)
+    elif callable(retry_on):
+        return retry_on(exc)  # type: ignore[call-arg]
     else:
-        raise TypeError(
-            "retry_on must be an Exception class, a list or tuple of Exception classes, or a callable"
-        )
+        raise TypeError(_RETRY_ON_TYPE_ERROR)
